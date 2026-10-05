@@ -93,15 +93,30 @@ def test_loopback_recognizes_the_usual_spellings():
 
 
 @respx.mock
-async def test_health_reports_ok_when_upstream_answers():
+async def test_health_reports_ok_when_upstream_answers(home):
     respx.get(FORECAST).mock(return_value=httpx.Response(200, json=FORECAST_DAILY))
 
     response = await server.health(MagicMock())
     import json
 
     body = json.loads(response.body)
+    assert response.status_code == 200
     assert body["status"] == "ok"
     assert body["openmeteo_reachable"] is True
+
+
+@respx.mock
+async def test_health_fails_without_a_home_location(monkeypatch):
+    """Named places still work, but every question about "here" silently breaks.
+    The monitor only reads the status code, so this has to be a 503."""
+    monkeypatch.delenv("WEATHER_MCP_HOME", raising=False)
+    respx.get(FORECAST).mock(return_value=httpx.Response(200, json=FORECAST_DAILY))
+    import json
+
+    response = await server.health(MagicMock())
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["status"] == "no home location configured"
 
 
 @respx.mock
@@ -117,18 +132,36 @@ async def test_health_publishes_whether_home_is_set_not_where_it_is(home):
 
 
 @respx.mock
-async def test_health_degrades_without_leaking_the_message():
+async def test_health_fails_without_leaking_the_message(home):
     """A DavError-style message can carry a URL; the class name cannot."""
     respx.get(FORECAST).mock(
         return_value=httpx.Response(200, json={"error": True, "reason": "secret detail"})
     )
     import json
 
-    body = json.loads((await server.health(MagicMock())).body)
+    response = await server.health(MagicMock())
+    body = json.loads(response.body)
 
-    assert body["status"] == "degraded"
+    assert response.status_code == 503
+    assert body["status"] == "Open-Meteo unreachable (WeatherError)"
     assert body["error"] == "WeatherError"
     assert "secret detail" not in json.dumps(body)
+
+
+@respx.mock
+async def test_health_lists_every_problem(monkeypatch):
+    monkeypatch.delenv("WEATHER_MCP_HOME", raising=False)
+    respx.get(FORECAST).mock(
+        return_value=httpx.Response(200, json={"error": True, "reason": "down"})
+    )
+    import json
+
+    response = await server.health(MagicMock())
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["status"] == (
+        "Open-Meteo unreachable (WeatherError), no home location configured"
+    )
 
 
 @respx.mock

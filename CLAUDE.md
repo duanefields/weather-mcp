@@ -56,7 +56,7 @@ in months, so it has to run on a clock rather than only on a push.
 An MCP server that bridges a model to Open-Meteo. Read-only throughout: there is
 no write path, no credential, and nothing here can change anything about the
 world. That is why there is no equivalent of dav-mcp's `_last_write`
-bookkeeping and no write branch in `scripts/healthcheck.sh`.
+bookkeeping and no write check in `/health`.
 
 1. **src/weather_mcp/openmeteo.py** — HTTP plumbing shared by all three hosts
    (forecast, geocoding, archive): parameter encoding, retries, the concurrency

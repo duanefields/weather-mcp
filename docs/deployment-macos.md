@@ -111,24 +111,35 @@ the OAuth callbacks and breaks the connector handshake.
 
 ## Monitoring
 
-`scripts/healthcheck.sh` polls `/health` and reports to a dead-man's-switch;
+`/health` makes the call itself, so any HTTP uptime monitor can watch it with no
+script on the host: point it at the public URL, e.g.
+`https://weather.example.com/health`, and treat anything but a 2xx as down.
+Uptime Kuma's plain **HTTP(s)** monitor type is enough.
+
+It answers 200 with `"status": "ok"`, or 503 with `status` naming every problem
+it found, comma-separated:
+
+- **`Open-Meteo unreachable (WeatherError)`**, or another exception class name.
+  Upstream is down, the free tier is exhausted, or the host lost DNS.
+- **`no home location configured`**. Not fatal — every tool still works when a
+  place is named explicitly — but without it every question about "here" fails,
+  which is most of them.
+
+A monitor alert only says 503; `curl` the endpoint for the reason. No response at
+all means the server is down or wedged, so give the monitor a timeout. The
+Open-Meteo probe is cached for 60 seconds, so polling more often than that only
+re-reads the cached result.
+
+A monitor running on the same host cannot report its own host's death. Cover
+that separately, with something off the machine.
+
 `scripts/self-update.sh` pulls the tracked branch and restarts the service when
-it moves. Both read config from `~/.weather-mcp/`, and both files must be
-`chmod 600` — a ping URL is a capability, not just an address.
+it moves. It reads `~/.weather-mcp/update.env`, which must be `chmod 600` if it
+holds a ping URL — that is a capability, not just an address.
 
 ```
-*/10 * * * * /Users/USERNAME/Code/weather-mcp/scripts/healthcheck.sh >> /Users/USERNAME/.weather-mcp/check.log 2>&1
 */15 * * * * /Users/USERNAME/Code/weather-mcp/scripts/self-update.sh >> /Users/USERNAME/.weather-mcp/update.log 2>&1
 ```
-
-Use a **distinct** healthchecks.io UUID per service. Sharing one lets a live
-service's pings mask a dead one's silence, which is the exact failure the
-monitoring exists to catch.
-
-The health check watches three things: whether the process answers at all,
-whether Open-Meteo is reachable, and whether a home location is configured. That
-last one is not fatal — every tool still works when a place is named explicitly
-— but without it every question about "here" fails, which is most of them.
 
 ## Cutover order
 

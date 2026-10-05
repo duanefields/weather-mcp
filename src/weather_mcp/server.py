@@ -2,7 +2,7 @@
 
 Read-only throughout. There is no write path, no credential, and nothing here
 can change anything about the world -- which is why there is no equivalent of
-dav-mcp's ``_last_write`` bookkeeping and no write branch in the healthcheck.
+dav-mcp's ``_last_write`` bookkeeping and no write check in ``/health``.
 """
 
 from __future__ import annotations
@@ -669,17 +669,34 @@ async def health(request):
     ``home_configured`` is a boolean rather than the location itself for exactly
     that reason: an operator needs to know the default is set, and nobody else
     needs to know where it points.
+
+    The verdict is made here, so the monitor only has to read the status code:
+    200 with ``status`` "ok", or 503 with ``status`` naming every problem found,
+    comma-separated. The other fields are there for whoever curls it next.
     """
     reachable, detail = await _probe()
+    home_configured = bool(os.environ.get("WEATHER_MCP_HOME", "").strip())
+
+    problems = []
+    # There is no credential to be revoked here, so the failure modes are
+    # narrower than a server with an account behind it: upstream is down, the
+    # free tier is exhausted, or the host lost DNS.
+    if not reachable:
+        problems.append(f"Open-Meteo unreachable ({detail})")
+    # Every tool still works when a place is named explicitly, but this silently
+    # breaks every question about "here", which is most of them.
+    if not home_configured:
+        problems.append("no home location configured")
 
     return JSONResponse(
         {
-            "status": "ok" if reachable else "degraded",
+            "status": ", ".join(problems) or "ok",
             "openmeteo_reachable": reachable,
             "error": detail,
-            "home_configured": bool(os.environ.get("WEATHER_MCP_HOME", "").strip()),
+            "home_configured": home_configured,
             "python_version": platform.python_version(),
-        }
+        },
+        status_code=503 if problems else 200,
     )
 
 
